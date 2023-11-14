@@ -7,6 +7,10 @@ import org.apache.pdfbox.tools.imageio.ImageIOUtil;
 import org.apache.poi.openxml4j.opc.OPCPackage;
 import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 import org.springframework.stereotype.Service;
 
 import java.awt.image.BufferedImage;
@@ -164,5 +168,80 @@ public class OCRServices {
 
     }
 
+    static Integer count = 1;
+    public static Document getHTMLFromURL(String urlString) {
+        try {
+            URL url = new URL(urlString);
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            int responseCode = connection.getResponseCode();
+
+            if (responseCode == HttpURLConnection.HTTP_OK) {
+                BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+                StringBuilder htmlContent = new StringBuilder();
+                String line;
+
+                while ((line = reader.readLine()) != null) {
+                    htmlContent.append(line);
+                }
+
+                reader.close();
+
+                count++;
+                System.out.println("Done: " + count);
+
+                return Jsoup.parse(htmlContent.toString());
+
+            } else {
+                throw new Error("Invalid URL - Response Code: " + responseCode);
+            }
+        } catch (IOException e) {
+            throw new Error("Invalid URL - " + e.getMessage());
+        }
+    }
+
+    private static Elements getIndiaCodeDownloadLinks(Elements elements){
+
+        Elements pdfLinksElements = new Elements();
+
+        for(Element element : elements) {
+            Document linksHTML = getHTMLFromURL("https://www.indiacode.nic.in/"+element.attr("href"));
+
+            pdfLinksElements.add(linksHTML.select("#content > div.container-fluid > div > div > div.row > a").first());
+
+        }
+        return pdfLinksElements;
+    }
+
+
+    public static List<HashMap<String, String>> getActsJSON() {
+
+        List<HashMap<String, String>> results = new ArrayList<>();
+
+        Document IndiaCode = getHTMLFromURL("https://www.indiacode.nic.in/handle/123456789/1362/browse?nccharset=3995E3B3&type=shorttitle&sort_by=1&order=DESC&rpp=5000&submit_browse=Update");
+
+        Elements IndiaCodeRows = IndiaCode.select("#content table tbody tr:not(:first-child)");
+
+        for(Element IndiaCodeRow : IndiaCodeRows) {
+            HashMap<String, String> row = new HashMap<>();
+
+            Elements IndiaCodeActDate = IndiaCodeRow.select("td:nth-child(1)");
+            Elements IndiaCodeActNumb = IndiaCodeRow.select("td:nth-child(2) em");
+            Elements IndiaCodeActName = IndiaCodeRow.select("td:nth-child(3) strong");
+            Elements IndiaCodeActLink = getIndiaCodeDownloadLinks(IndiaCodeRow.select("td:nth-child(4) > a[href]"));
+
+            row.put("enactmentDate", IndiaCodeActDate.text());
+            row.put("actNumber", IndiaCodeActNumb.text());
+            row.put("actName", IndiaCodeActName.text());
+            row.put("actLink", IndiaCodeActLink.attr("href"));
+
+            results.add(row);
+            System.out.println(results);
+        }
+
+         return results;
+    }
+
 
 }
+
