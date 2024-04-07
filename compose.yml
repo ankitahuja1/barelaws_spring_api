@@ -1,0 +1,145 @@
+x-logging: &default-logging
+  driver: loki
+  options:
+    loki-url: 'http://localhost:3100/api/prom/push'
+    loki-pipeline-stages: |
+      - multiline:
+          firstline: '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}.\d{3}'
+          max_wait_time: 3s
+      - regex:
+          expression: '^(?P<date>\d{4}-\d{2}-\d{2}) (?P<time>\d{2}:\d{2}:\d{2}.\d{3}) (?P<message>(?s:.*))$$'
+
+version: "3.4"
+
+services:
+
+  # Infrastructure
+
+  loki:
+    image: grafana/loki:2.9.2
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+
+  prometheus:
+    image: prom/prometheus:v2.47.2
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./etc/prometheus:/workspace
+    command:
+      - --config.file=/workspace/prometheus.yml
+      - --enable-feature=exemplar-storage
+    depends_on:
+      - loki
+    logging: *default-logging
+
+  tempo:
+    image: grafana/tempo:2.2.4
+    command: [ "--target=all", "--storage.trace.backend=local", "--storage.trace.local.path=/var/tempo", "--auth.enabled=false" ]
+    ports:
+      - "14250:14250"
+      - "4317:4317"
+    depends_on:
+      - loki
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    ports:
+      - "3010:3000"
+    volumes:
+      - ./etc/grafana/:/etc/grafana/provisioning/datasources
+      - ./etc/dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml
+      - ./etc/dashboards:/etc/grafana/dashboards
+    depends_on:
+      - loki
+      - prometheus
+    logging: *default-logging
+
+  # Applications
+
+  app-b:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    environment:
+      - TARGET_ONE_HOST=app-b
+      - TARGET_TWO_HOST=app-c
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4317
+      - OTEL_SERVICE_NAME=app-b
+      - OTEL_RESOURCE_ATTRIBUTES=compose_service=app-b
+      - OTEL_METRICS_EXPORTER=none
+      - MANAGEMENT_METRICS_TAGS_APPLICATION=app-b
+      - spring.datasource.url=jdbc:mysql://mysqldb:3306/bls_data?allowPublicKeyRetrieval=true
+      - spring.elasticsearch.uris=http://elasticsearch:9200
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mysqldb
+
+  postgres:
+    image: postgres:16.0
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    ports:
+      - "5432:5432"
+    logging: *default-logging
+
+  redis:
+    image: redis:7.2.2
+    ports:
+      - "6379:6379"
+    logging: *default-logging
+
+
+  mysqldb:
+    image: mysql:latest
+    restart: always
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_DATABASE: bls_data
+      MYSQL_USER: bls_user
+      MYSQL_PASSWORD: mipilipo
+      MYSQL_ROOT_PASSWORD: mipilipo
+    volumes:
+      - db_data:/var/lib/mysql
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.4.0
+    container_name: elasticsearch
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    restart: always
+    environment:
+      - xpack.security.enabled=false
+      - discovery.type=single-node
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+  kibana:
+    depends_on:
+      - elasticsearch
+    image: docker.elastic.co/kibana/kibana:8.4.0
+    container_name: kibana
+    volumes:
+      - kibana-data:/usr/share/kibana/data
+    ports:
+      - "5601:5601"
+    restart: always
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+
+volumes:
+  db_data:
+  elasticsearch-data:
+    driver: local
+  kibana-data:
+    driver: local

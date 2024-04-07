@@ -1,30 +1,33 @@
 package com.barelaws.barelaws_api.service;
 
+import com.barelaws.barelaws_api.entity.ActEntity;
+import com.barelaws.barelaws_api.repository.ActsRepository;
+import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
-import org.apache.pdfbox.tools.imageio.ImageIOUtil;
 import org.apache.poi.openxml4j.opc.OPCPackage;
 import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.fit.pdfdom.PDFDomTree;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.awt.image.BufferedImage;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
 
 
 @Service
 public class OCRServices {
+
+    @Autowired
+    private ActsRepository actsRepository;
 
     public Map<String, String> performOCR3(String filePath) {
 
@@ -50,11 +53,24 @@ public class OCRServices {
         }
     }
 
+    public List<ActEntity> getActsData(){
+
+        List<ActEntity> actsData = actsRepository.findAllBy();
+
+        List<ActEntity> actDataPath = new ArrayList<>();
+
+        actsData.forEach(actEntity -> {
+            actEntity.setFileName(actEntity.getActNumber() + "__bls__" + actEntity.getEnactmentDate() + ".pdf");
+            actDataPath.add(actEntity);
+        });
+
+        return actDataPath;
+    }
 
     public Map<String, String> pdfToText(String filePath) throws Exception {
         final Map<String, String> response = new HashMap<>();
 
-        PDDocument document = PDDocument.load(new File(filePath)); // Load the PDF document
+        PDDocument document = Loader.loadPDF(new File(filePath)); // Load the PDF document
 
         PDFTextStripper pdfTextStripper = new PDFTextStripper();
         StringBuilder result = new StringBuilder();
@@ -74,6 +90,31 @@ public class OCRServices {
         response.put("status", "1");
         response.put("msg", "Success");
         response.put("results", result.toString());
+        return response;
+    }
+
+    public Map<String, String> pdfToHTML(String filePath) throws Exception {
+        final Map<String, String> response = new HashMap<>();
+
+        String htmlFilePath = "/Users/ankitahuja/crpc.html";
+
+        PDDocument pdf = Loader.loadPDF(new File(filePath)); // Load the PDF document
+
+        PDFDomTree parser = new PDFDomTree();
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        Writer output = new PrintWriter(baos, true, StandardCharsets.UTF_8);
+        parser.writeText(pdf, output);
+        output.close();
+        pdf.close();
+
+        FileWriter writer = new FileWriter(htmlFilePath);
+        writer.write(baos.toString(StandardCharsets.UTF_8));
+        writer.close();
+
+
+        response.put("status", "1");
+        response.put("msg", "Success");
+        response.put("results", baos.toString(StandardCharsets.UTF_8));
         return response;
     }
 
@@ -230,10 +271,10 @@ public class OCRServices {
             Elements IndiaCodeActName = IndiaCodeRow.select("td:nth-child(3) strong");
             Elements IndiaCodeActLink = getIndiaCodeDownloadLinks(IndiaCodeRow.select("td:nth-child(4) > a[href]"));
 
-            row.put("enactmentDate", IndiaCodeActDate.text());
-            row.put("actNumber", IndiaCodeActNumb.text());
-            row.put("actName", IndiaCodeActName.text());
-            row.put("actLink", IndiaCodeActLink.attr("href"));
+            row.put("enactment_date", IndiaCodeActDate.text());
+            row.put("act_number", IndiaCodeActNumb.text());
+            row.put("act_name", IndiaCodeActName.text());
+            row.put("act_link", IndiaCodeActLink.attr("href"));
 
             results.add(row);
             System.out.println(results);
